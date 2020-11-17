@@ -1,0 +1,208 @@
+## Initialize 
+```{r Initialize, echo=FALSE}
+rm(list=ls())
+#install & bring packages to the workspace
+pacman::p_load(grid, knitr, jmv, data.table, plyr, ggplot2, RColorBrewer, tidyverse, devtools, easyGgplot2, papaja, psych, lme4, afex, emmeans)
+#pacman::p_load(jmv, ggplot, tidyverse, devtools, easyGgplot2, papaja, psych, lme4, afex, emmeans)
+printf <- function(...) cat(sprintf(...))
+```
+## data info.
+```{r column: real data}
+#params.
+nPerm=10000
+#path and directories
+path = '/Users/auna/Dropbox/2018-2019skku/CrM/from_local_fMRIfiles/Decoding_CrM/stat'
+csv_path = file.path(path, 'paired_ttest_pval_results')
+output_path=file.path(path, 'pdf_fig')
+ifelse(!dir.exists(output_path), dir.create(output_path), FALSE)
+ifelse(!dir.exists(csv_path), dir.create(csv_path), FALSE)
+#cond. and ROIs
+cond = c("vOnlyCoh1") #"cong", "incong", "amb" 
+roi = c("V1", "V2", "V3")
+region= c("fovea3.5_fmasked", "periphery-fovea3.5_fmasked")
+```
+
+## make resulting data structure
+```{r make resulting data structure, include=FALSE}
+df_tval = data.frame(matrix(vector(), 0, 5,
+                            dimnames=list(c(), c("cond", "ROI", "fp", "nPerm", "tvalue"))),
+                     stringsAsFactors=Y)
+df_pval = data.frame(matrix(vector(), 0, 5,
+                            dimnames=list(c(), c("cond", "ROI", "fp", "value", "sig"))),
+                     stringsAsFactors=Y)
+
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+```
+## ONE SAMPLE t-TEST ##
+```{r paired t-TEST, include=FALSE}
+knitr::kable(df_tval)
+
+for (xCond in 1:length(cond)){
+  printf('%s condition...\n', cond[xCond])
+  for (xROI in 1:length(roi)){
+    for (xFP in 1:length(region)){
+      printf('starting no. %d out of %d ROI: %s\n', xROI, length(roi), roi[xROI])
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI], region[xFP]) 
+      wide_data = read.csv(file.path(prefix), header=FALSE)
+      #check shape (nsbj, nPerm+real_acc)
+      dim(wide_data)
+      #data reshape
+      wide_data = wide_data %>%  mutate(SN = rownames(wide_data), roi=roi[xROI], cond=cond[xCond], fp=region[xFP])
+      wide_df = rbind(wide_df, wide_data)
+    }}}
+
+
+data <- melt(setDT(wide_df), id.vars = c("SN", "cond", "fp", "roi"), variable.name = c("Perm"))
+names(data) = c("SN", "cond", "fp", "roi", "Perm", "acc")
+
+data$roi = as.factor(data$roi)
+data$fp = as.factor(data$fp)
+roi = unique(data$roi)
+
+#one-sample t-test
+for (xROI in 1:(length(roi))){
+  for (i in 1:(nPerm+1)){
+    test_perm_F = data[which(data$Perm == paste("V", i, sep="") & data$roi ==levels(roi)[xROI] & data$fp == region[1]),]
+    test_perm_P = data[data$Perm == paste("V", i, sep="") & data$roi ==levels(roi)[xROI] & data$fp == region[2],]
+    results = t.test(test_perm_F$acc, test_perm_P$acc, paired = TRUE, alternative = "two.sided")$statistic
+    cur_tval = round(as.numeric(results),6)
+    df_tval <-rbind(df_tval, data.frame(cond=cond[xCond], 
+                                        roi=roi[xROI], 
+                                        nPerm=i,
+                                        tvalue=cur_tval))
+    if (i %% 500 == 0) {
+      printf('%s %s fovea-periphery permutation testing no. %d\n', cond[xCond], roi[xROI], i)
+    }
+  }
+}
+
+```
+
+## significance check ##
+```{r save dataframe as csv, include=FALSE}
+knitr::kable(df_pval)
+#p-value 
+sig_notsig = c("not significant", "significant")
+for (xCond in 1:length(cond)){
+  for (xROI in 1:length(roi)){
+    real_tval = filter(df_tval, nPerm %in% 10001)
+    real_tval = real_tval[real_tval$cond == cond[xCond] & real_tval$roi == roi[xROI],]
+     if (real_tval$tvalue < 0 ){
+      count = df_tval[df_tval$cond == cond[xCond] & df_tval$roi == roi[xROI] & df_tval$tvalue <= real_tval$tvalue,]
+      }else{
+        if (real_tval$tvalue > 0)
+          count = df_tval[df_tval$cond == cond[xCond] & df_tval$roi == roi[xROI] & df_tval$tvalue >= real_tval$tvalue,]
+        }
+    cur_pval = round(((dim(count)[1]*2)/nPerm), 6)
+    cur_sig = as.integer(cur_pval < 0.05)
+    df_pval = rbind(df_pval, data.frame(cond=cond[xCond],
+                                        roi=roi[xROI],
+                                        sig=cur_sig,
+                                        value=cur_pval))
+    #print results
+    printf("%s %s's decoding accuracy is %s, p=%2.3f\n", 
+           cond[xCond], roi[xROI], sig_notsig[cur_sig+1], cur_pval)
+  }}
+```
+
+
+```{r make another resulting data structure, include=FALSE}
+df_tval_anat = data.frame(matrix(vector(), 0, 5,
+                            dimnames=list(c(), c("cond", "ROI", "fp", "nPerm", "tvalue"))),
+                     stringsAsFactors=Y)
+df_pval_anat = data.frame(matrix(vector(), 0, 5,
+                            dimnames=list(c(), c("cond", "ROI", "fp", "value", "sig"))),
+                     stringsAsFactors=Y)
+
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+```
+## PAIRED t-TEST ##
+```{r paired t-TEST, include=FALSE}
+region= c("fovea3.5", "periphery-fovea3.5")
+
+
+for (xCond in 1:length(cond)){
+  printf('%s condition...\n', cond[xCond])
+  for (xROI in 1:length(roi)){
+    for (xFP in 1:length(region)){
+      printf('starting no. %d out of %d ROI: %s\n', xROI, length(roi), roi[xROI])
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI], region[xFP]) 
+      wide_data = read.csv(file.path(prefix), header=FALSE)
+      #check shape (nsbj, nPerm+real_acc)
+      dim(wide_data)
+      #data reshape
+      wide_data = wide_data %>%  mutate(SN = rownames(wide_data), roi=roi[xROI], cond=cond[xCond], fp=region[xFP])
+      wide_df = rbind(wide_df, wide_data)
+    }}}
+
+
+data <- melt(setDT(wide_df), id.vars = c("SN", "cond", "fp", "roi"), variable.name = c("Perm"))
+names(data) = c("SN", "cond", "fp", "roi", "Perm", "acc")
+
+data$roi = as.factor(data$roi)
+data$fp = as.factor(data$fp)
+roi = unique(data$roi)
+
+#one-sample t-test
+for (xROI in 1:(length(roi))){
+  for (i in 1:(nPerm+1)){
+    test_perm_F = data[which(data$Perm == paste("V", i, sep="") & data$roi ==levels(roi)[xROI] & data$fp == region[1]),]
+    test_perm_P = data[data$Perm == paste("V", i, sep="") & data$roi ==levels(roi)[xROI] & data$fp == region[2],]
+    results = t.test(test_perm_F$acc, test_perm_P$acc, paired = TRUE, alternative = "two.sided")$statistic
+    cur_tval = round(as.numeric(results),6)
+    df_tval_anat <-rbind(df_tval_anat, data.frame(cond=cond[xCond], 
+                                        roi=paste(roi[xROI], "_anat", sep=""),
+                                        nPerm=i,
+                                        tvalue=cur_tval))
+    if (i %% 500 == 0) {
+      printf('%s %s fovea-periphery permutation testing no. %d\n', cond[xCond], roi[xROI], i)
+    }
+  }
+}
+
+```
+
+## significance check ##
+```{r save dataframe as csv, include=FALSE}
+#p-value 
+sig_notsig = c("not significant", "significant")
+for (xCond in 1:length(cond)){
+  for (xROI in 1:length(roi)){
+    real_tval = filter(df_tval_anat, nPerm %in% 10001)
+    real_tval = real_tval[real_tval$cond == cond[xCond] & real_tval$roi == paste(roi[xROI], "_anat", sep=""),]
+     if (real_tval$tvalue < 0 ){
+      count = df_tval_anat[df_tval_anat$cond == cond[xCond] & df_tval_anat$roi == paste(roi[xROI], "_anat", sep="") & df_tval_anat$tvalue <= real_tval$tvalue,]
+      }else{
+        if (real_tval$tvalue > 0)
+          count = df_tval_anat[df_tval_anat$cond == cond[xCond] & df_tval_anat$roi == paste(roi[xROI], "_anat", sep="") & df_tval_anat$tvalue >= real_tval$tvalue,]
+        }
+    cur_pval = round(((dim(count)[1]*2)/nPerm), 6)
+    cur_sig = as.integer(cur_pval < 0.05)
+    df_pval_anat = rbind(df_pval_anat, data.frame(cond=cond[xCond],
+                                        roi=paste(roi[xROI], "_anat", sep=""),
+                                        sig=cur_sig,
+                                        value=cur_pval))
+    #print results
+    printf("%s %s's decoding accuracy is %s, p=%2.3f\n", 
+           cond[xCond], roi[xROI], sig_notsig[cur_sig+1], cur_pval)
+  }}
+
+```
+
+``` {save as csv file}
+
+df_tval_FNL = full_join(df_tval, df_tval_anat)
+df_pval_FNL = full_join(df_pval, df_pval_anat)
+
+## save dataframe tables as .csv files ##
+tval_csv_name=sprintf("%s/paired_ttest_fp_%s_tval_perms_results.csv", csv_path, cond[xCond]) 
+pval_csv_name=sprintf("%s/paired_ttest_fp_%s_pval_results.csv", csv_path, cond[xCond])
+write.csv(df_tval,file.path(tval_csv_name))
+write.csv(df_pval,file.path(pval_csv_name))
+```

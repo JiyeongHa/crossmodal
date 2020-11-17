@@ -1,0 +1,685 @@
+---
+title: "rmanova_with_null_data"
+author: "jyh"
+date: "3/26/2020"
+output: html_document
+---
+
+## Initialize 
+```{r Initialize, echo=FALSE}
+rm(list=ls())
+#install & bring packages to the workspace
+pacman::p_load(emmeans, rstatix, grid, knitr, jmv, data.table, plyr, ggplot2, RColorBrewer, tidyverse, devtools, easyGgplot2, papaja, psych, lme4, afex)
+#pacman::p_load(jmv, ggplot, tidyverse, devtools, easyGgplot2, papaja, psych, lme4, afex, emmeans)
+printf <- function(...) cat(sprintf(...))
+```
+## data info.
+```{r data info., include=FALSE}
+#rows:subjects
+#1:10000 columns: permutation results
+#10001 column: real data
+
+#params.
+nPerm=10000
+#path and directories
+path = '/Users/auna/Dropbox/2018-2019skku/CrM/from_local_fMRIfiles/Decoding_CrM/stat'
+csv_path = file.path(path, 'rmanova_pval_results')
+output_path=file.path(path, 'pdf_fig')
+ifelse(!dir.exists(output_path), dir.create(output_path), FALSE)
+ifelse(!dir.exists(csv_path), dir.create(csv_path), FALSE)
+
+
+```
+
+```{r Repeated-measures ANOVA: C vs. I vs. A main effect within each visual area}
+
+#basic info.
+cond = c("cong", "incong", "amb") 
+roi = c("MT", "FFA", "PPA") 
+
+#make df for results 
+df_perm_aov = data.frame(matrix(vector(), 0, 5,
+                                dimnames=list(c(), c("effect", "ROI", "nPerm", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+
+#melt data structure 
+for (xROI in 1:length(roi)){
+  
+  wide_df <- data.frame(Date=as.Date(character()),
+                        File=character(), 
+                        User=character(), 
+                        stringsAsFactors=TRUE)
+  
+  for (xCond in 1:length(cond)){
+    prefix = sprintf("%s/%s_%s_acc_all_dist.csv", cin_path, cond[xCond], roi[xROI]) 
+    data = read.csv(file.path(prefix), header=TRUE)
+    data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI])
+    wide_df = rbind(wide_df, data)
+  }
+  
+  cia_df <- melt(setDT(wide_df), 
+                 id.vars = c("SN", "cond", "roi"), 
+                 variable.name = c("Perm"))
+  
+  names(cia_df) = c("SN", "cond", "roi", "Perm", "acc")
+  cia_df$cond = as.factor(cia_df$cond)
+  cia_df$roi = as.factor(cia_df$roi)
+  cia_df$SN = as.factor(cia_df$SN)
+  
+  #anova for each permutation 
+  printf('C vs. I vs. A one-way RM ANOVA\n')
+  printf('starting no. %d out of %d ROI %s\n', xROI, length(roi), roi[xROI])
+  for (i in 1:(nPerm+1)){
+    test_perm = cia_df %>% filter(Perm %in% paste("V", i, sep=""))
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = cond)$ANOVA 
+    df_perm_aov = rbind(df_perm_aov, data.frame(effect="cia", 
+                                                roi=roi[xROI], 
+                                                nPerm=i,
+                                                Fvalue=res.aov$F,
+                                                p=res.aov$p))
+    if (i %% 500 == 0) {
+      printf('%s permutation testing no. %d\n', roi[xROI], i)
+    }
+  }
+}
+
+```
+
+
+``` {r save dataframe as csv }
+knitr::kable(df_cia_pval)
+
+df_cia_pval = data.frame(matrix(vector(), 0, 4,
+                                dimnames=list(c(), c("effect", "ROI", "pvalue", "sig"))),
+                         stringsAsFactors=Y)
+
+roi = unique(df_perm_aov$roi)
+cond = unique(df_perm_aov$cond)
+
+#p-value 
+sig_notsig = c("not significant", "significant")
+for (xROI in 1:length(roi)){
+  real_fval = df_perm_aov %>% filter(nPerm %in% 10001 & effect %in% "cia" & roi %in% levels(roi)[xROI])
+  count = df_perm_aov %>% filter(effect %in% "cia" & roi %in% levels(roi)[xROI] & Fvalue >= real_fval$Fvalue)
+  cur_pval = round((dim(count)[1]/nPerm), 4)
+  cur_sig = as.integer(cur_pval < 0.025)
+  df_cia_pval = rbind(df_cia_pval, data.frame(effect="cia",
+                                              roi=roi[xROI],
+                                              sig=cur_sig,
+                                              value=cur_pval))
+  #print results
+  printf("C vs. I vs. A main effect in %s is %s, p=%2.3f\n", 
+         roi[xROI], sig_notsig[cur_sig+1], cur_pval)
+}
+
+#FDR correction
+pval_varea = df_cia_pval$value 
+adj_pval_varea = p.adjust(pval_varea, method = "fdr", n = length(pval_varea))
+df_cia_pval = df_cia_pval %>% mutate(adj_pval = adj_pval_varea)
+
+## save dataframe tables as .csv files ##
+fval_csv_name=sprintf("%s/cia_rmanova_%s_fval_varea_perms_results.csv", csv_path, "CIN") 
+pval_csv_name=sprintf("%s/cia_rmanova_%s_pval_varea_results.csv", csv_path, "CIN")
+write.csv(df_perm_aov, file.path(fval_csv_name))
+write.csv(df_cia_pval, file.path(pval_csv_name))
+
+```
+
+
+```{undefined r Repeated-measures ANOVA: 3 x 2 cia vs. fp, include=FALSE}
+cond = c("cong", "incong", "amb") 
+roi = c("V1", "V2", "V3")
+region= c("fovea3.5_fmasked", "periphery-fovea3.5_fmasked")
+
+df_perm_aov = data.frame(matrix(vector(), 0, 5,
+                                dimnames=list(c(), c("effect", "ROI", "nPerm", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+
+
+for (xROI in 1:length(roi)){
+  for (xFP in 1:length(region)){
+    for (xCond in 1:length(cond)){
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", cin_path, cond[xCond], roi[xROI], region[xFP]) 
+      data = read.csv(file.path(prefix), header=TRUE)
+      data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI], fp = region[xFP])
+      wide_df = rbind(wide_df, data)
+    }}}
+
+
+cia_fp_df <- melt(setDT(wide_df), 
+                  id.vars = c("SN", "cond", "roi", "fp"), 
+                  variable.name = c("Perm"))
+
+names(cia_fp_df) = c("SN", "cond", "roi", "fp", "Perm", "acc")
+cia_fp_df$cond = as.factor(cia_fp_df$cond)
+cia_fp_df$SN = as.factor(cia_fp_df$SN)
+cia_fp_df$fp = as.factor(cia_fp_df$fp)
+cia_fp_df$roi = as.factor(cia_fp_df$roi)
+
+#anova for each permutation 
+printf('3 (cia) x 2 (fp) RM ANOVA\n')
+printf('starting no. %d out of %d ROI %s\n', xROI, length(roi), roi[xROI])
+
+roi = unique(cia_fp_df$roi)
+
+for (xROI in 1:length(roi)){
+  for (i in 1:nPerm+1){
+    test_perm = cia_fp_df %>% filter(Perm %in% paste("V", i, sep=""), roi %in% levels(roi)[xROI]) 
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = c(cond, fp))$ANOVA 
+    df_perm_aov = rbind(df_perm_aov, data.frame(effect=res.aov$Effect[1], 
+                                                roi=roi[xROI], 
+                                                nPerm=i,
+                                                Fvalue=res.aov$F[1],
+                                                p=res.aov$p[1]))
+    df_perm_aov = rbind(df_perm_aov, data.frame(effect=res.aov$Effect[2], 
+                                                roi=roi[xROI], 
+                                                nPerm=i,
+                                                Fvalue=res.aov$F[2],
+                                                p=res.aov$p[2]))
+    df_perm_aov = rbind(df_perm_aov, data.frame(effect=res.aov$Effect[3], 
+                                                roi=roi[xROI], 
+                                                nPerm=i,
+                                                Fvalue=res.aov$F[3],
+                                                p=res.aov$p[3]))
+    if (i %% 500 == 0) {
+      printf('%s permutation testing no. %d\n', roi[xROI], i)
+    }
+  }
+}
+
+
+```
+
+``` {r save as csv file}
+knitr::kable(df_cia_pval)
+
+df_cia_fp_pval = data.frame(matrix(vector(), 0, 4,
+                                   dimnames=list(c(), c("effect", "ROI", "pvalue", "sig"))),
+                            stringsAsFactors=Y)
+
+effects = unique(df_perm_aov$effect)
+#p-value 
+sig_notsig = c("not significant", "significant")
+for (xROI in 1:length(roi)){
+  for (xEff in 1:length(effects)){
+    real_fval = df_perm_aov[df_perm_aov$nPerm == 10001 & df_perm_aov$effect == effects[xEff] & df_perm_aov$roi == roi[xROI], ]
+    #df_perm_aov %>% filter(nPerm %in% 10001 & effect %in% effects[xEff] & roi %in% roi[xROI])
+    count = df_perm_aov[df_perm_aov$effect == effects[xEff] & df_perm_aov$roi == roi[xROI] & df_perm_aov$Fvalue >= real_fval$Fvalue,]
+    cur_pval = round((dim(count)[1]/nPerm), 5)
+    cur_sig = as.integer(cur_pval < 0.025)
+    df_cia_fp_pval = rbind(df_cia_fp_pval, data.frame(effect=effects[xEff],
+                                                      roi=roi[xROI],
+                                                      sig=cur_sig,
+                                                      value=cur_pval))
+    #print results
+    printf("3x2 RM ANOVA: %s effect in %s is %s, p=%2.3f\n", 
+           effects[xEff], roi[xROI], sig_notsig[cur_sig+1], cur_pval)
+  }}
+
+## save dataframe tables as .csv files ##
+fval_csv_name=sprintf("%s/rmanova_cfp_%s_fval_varea_perms_results.csv", csv_path, "CIN") 
+pval_csv_name=sprintf("%s/rmanova_cfp_%s_pval_varea_results.csv", csv_path, "CIN")
+write.csv(df_perm_aov, file.path(fval_csv_name))
+write.csv(df_cia_fp_pval, file.path(pval_csv_name))
+
+```
+
+```{r Post-hoc test for 3 x 2 ANOVA}
+
+#condition & ROI names
+cond = c("cong", "incong", "amb") 
+roi = c("V1", "V2", "V3")
+region= c("fovea3.5_fmasked", "periphery-fovea3.5_fmasked")
+
+#make empty df.s for result 
+df_perm_aov = data.frame(matrix(vector(), 0, 8,
+                                dimnames=list(c(), c("contrast", "ROI", "nPerm", "SE", "df", "tratio",  "estimate", "p"))),
+                         stringsAsFactors=Y)
+
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+#afex options
+afex_options("round_p"=7)
+afex_options("include_aov" = TRUE)
+
+subnum=1:14
+SN_s = paste("S", subnum, sep="")
+SN_s = as_factor(SN_s)
+#load each perm files
+for (xROI in 1:length(roi)){
+  for (xFP in 1:length(region)){
+    for (xCond in 1:length(cond)){
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", cin_path, cond[xCond], roi[xROI], region[xFP]) 
+      data = read.csv(file.path(prefix), header=TRUE)
+      data = data %>% mutate(SN = SN_s, cond = cond[xCond], roi = roi[xROI], fp = region[xFP])
+      wide_df = rbind(wide_df,  data)
+    }}}
+
+cia_fp_df <- melt(setDT(wide_df), 
+                  id.vars = c("SN", "cond", "roi", "fp"), 
+                  variable.name = c("Perm"))
+
+names(cia_fp_df) = c("SN", "cond", "roi", "fp", "Perm", "acc")
+#cia_fp_df$SN = as.factor(cia_fp_df$SN)
+cia_fp_df$cond = as.factor(cia_fp_df$cond)
+cia_fp_df$SN = as.factor(cia_fp_df$SN)
+cia_fp_df$fp = as.factor(cia_fp_df$fp)
+cia_fp_df$roi = as.factor(cia_fp_df$roi)
+
+
+
+for (xROI in 1:length(roi)){
+  #anova for each permutation 
+  
+  printf('3 (cia) x 2 (fp) RM ANOVA post-hoc \n')
+  printf('starting no. %d out of %d ROI %s\n', xROI, length(roi), roi[xROI])
+  for (i in 1:(nPerm+1)){
+    test_perm = cia_fp_df %>% filter(Perm %in% paste("V", i, sep=""), roi %in% levels(roi)[xROI]) 
+    res.aov = aov_car(acc ~ cond*fp + Error(SN/cond*fp), data=test_perm, anova_table = list(correction = "none"))
+    #post hoc test permutation..
+    res.posthoc = pairs(emmeans(res.aov, ~ cond*fp), adjust='None')
+    res.posthoc = as.data.frame(res.posthoc)
+    df_perm_aov = rbind(df_perm_aov, data.frame(contrast=res.posthoc$contrast, 
+                                                roi=roi[xROI], 
+                                                nPerm=i,
+                                                SE = res.posthoc$SE,
+                                                df = res.posthoc$df,
+                                                tratio= res.posthoc$t.ratio,
+                                                estimate= res.posthoc$estimate,
+                                                p=res.posthoc$p.value))
+    if (i %% 500 == 0) {
+      printf('%s post-hoc permutation testing no. %d\n', roi[xROI], i)
+    }
+    
+  }}
+
+
+
+
+```
+```{r post-hoc results save}
+
+
+df_posthoc_pval = data.frame(matrix(vector(), 0, 5,
+                                    dimnames=list(c(), c("contrast", "df", "ROI", "pvalue", "sig"))),
+                             stringsAsFactors=Y)
+
+contrast = unique(df_perm_aov$contrast)
+#p-value 
+sig_notsig = c("not significant", "significant")
+for (xROI in 1:length(roi)){
+  for (xEff in 1:length(contrast)){
+    real_fval = df_perm_aov[df_perm_aov$nPerm == 10001 & df_perm_aov$contrast == contrast[xEff] & df_perm_aov$roi == roi[xROI], ]
+    #df_perm_aov %>% filter(nPerm %in% 10001 & effect %in% effects[xEff] & roi %in% roi[xROI])
+    if (real_fval$tratio < 0 ){
+      count = df_perm_aov[df_perm_aov$contrast == contrast[xEff] & df_perm_aov$roi == roi[xROI] & df_perm_aov$tratio <= real_fval$tratio,]
+      }else{
+        if (real_fval$tratio > 0)
+          count = df_perm_aov[df_perm_aov$contrast == contrast[xEff] & df_perm_aov$roi == roi[xROI] & df_perm_aov$tratio >= real_fval$tratio,]
+        }
+    
+    cur_pval = round((dim(count)[1]/nPerm)*2, 7)
+    cur_sig = as.integer(cur_pval < 0.05)
+    df_posthoc_pval = rbind(df_posthoc_pval, data.frame(contrast=contrast[xEff],
+                                                        df=real_fval$df,
+                                                        roi=roi[xROI],
+                                                        sig=cur_sig,
+                                                        value=cur_pval))
+    
+    #print results
+    printf("3x2 RM ANOVA post-hoc: %s contrast in %s is %s, p=%2.3f\n", 
+           contrast[xEff], roi[xROI], sig_notsig[cur_sig+1], cur_pval)
+  }}
+
+## save dataframe tables as .csv files ##
+fval_csv_name=sprintf("%s/rmanova_posthoc_%s_tval_varea_perms_results.csv", csv_path, "CIN") 
+pval_csv_name=sprintf("%s/rmanova_posthoc_%s_pval_varea_results.csv", csv_path, "CIN")
+write.csv(df_perm_aov, file.path(fval_csv_name))
+write.csv(df_posthoc_pval, file.path(pval_csv_name))
+
+```
+
+```{r Repeated-measures ANOVA with vOnly or aOnly cond. : visual area main effect}
+
+#basic info.
+cond = c("vOnlyCoh1") 
+xCond=1
+roi = c("V1_fmasked", "V2_fmasked", "V3_fmasked") 
+
+#make df for results 
+df_perm_aov1 = data.frame(matrix(vector(), 0, 4,
+                                dimnames=list(c(), c("effect", "nPerm", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+
+#melt data structure 
+
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+for (xROI in 1:length(roi)){
+  prefix = sprintf("%s/%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI]) 
+  data = read.csv(file.path(prefix), header=FALSE)
+  data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI])
+  wide_df = rbind(wide_df, data)
+}
+
+cond_df <- melt(setDT(wide_df), 
+                     id.vars = c("SN", "cond", "roi"), 
+                     variable.name = c("Perm"))
+
+names(cond_df) = c("SN", "cond", "roi", "Perm", "acc")
+cond_df$cond = as.factor(cond_df$cond)
+cond_df$roi = as.factor(cond_df$roi)
+cond_df$SN = as.factor(cond_df$SN)
+
+
+  #anova for each permutation 
+  printf('%s visual area one-way RM ANOVA\n', cond[xCond])
+    printf('Starting with fmasked roi...\n')
+  for (i in 1:(nPerm+1)){
+    test_perm = cond_df %>% filter(Perm %in% paste("V", i, sep=""))
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = roi)$ANOVA 
+    df_perm_aov1 = rbind(df_perm_aov1, data.frame(effect="varea", 
+                                                nPerm=i,
+                                                Fvalue=res.aov$F,
+                                                p=res.aov$p))
+    if (i %% 500 == 0) {
+      printf('no.%s permutation testing\n',i)
+    }
+  }
+
+```
+
+```{r Repeated-measures ANOVA with vOnly cond. - anat : visual area main effect}
+
+#basic info.
+roi = c("V1_fov+peri", "V2_fov+peri", "V3_fov+peri") 
+
+#make df for results 
+df_perm_aov2 = data.frame(matrix(vector(), 0, 4,
+                                dimnames=list(c(), c("effect", "nPerm", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+
+#melt data structure 
+
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+for (xROI in 1:length(roi)){
+  prefix = sprintf("%s/%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI]) 
+  data = read.csv(file.path(prefix), header=FALSE)
+  data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI])
+  wide_df = rbind(wide_df, data)
+}
+
+vOnlyCoh1_df <- melt(setDT(wide_df), 
+                     id.vars = c("SN", "cond", "roi"), 
+                     variable.name = c("Perm"))
+
+names(vOnlyCoh1_df) = c("SN", "cond", "roi", "Perm", "acc")
+vOnlyCoh1_df$cond = as.factor(vOnlyCoh1_df$cond)
+vOnlyCoh1_df$roi = as.factor(vOnlyCoh1_df$roi)
+vOnlyCoh1_df$SN = as.factor(vOnlyCoh1_df$SN)
+
+
+  #anova for each permutation 
+  printf('Visual area one-way RM ANOVA\n')
+    printf('Starting with anat roi...\n')
+  for (i in 1:(nPerm+1)){
+    test_perm = vOnlyCoh1_df %>% filter(Perm %in% paste("V", i, sep=""))
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = roi)$ANOVA 
+    df_perm_aov2 = rbind(df_perm_aov2, data.frame(effect="varea_anat", 
+                                                cond=cond[xCond],
+                                                nPerm=i,
+                                                Fvalue=res.aov$F,
+                                                p=res.aov$p))
+    if (i %% 500 == 0) {
+      printf('no.%s permutation testing\n',i)
+    }
+  }
+
+```
+
+``` {r save dataframe as csv }
+df_cond_pval = data.frame(matrix(vector(), 0, 3,
+                                dimnames=list(c(), c("effect", "pvalue", "sig"))),
+                         stringsAsFactors=Y)
+
+df_perm_aov_FNL = full_join(df_perm_aov1, df_perm_aov2)
+
+#p-value 
+effect=c("varea", "varea_anat")
+for (xEffect in effect){
+sig_notsig = c("not significant", "significant")
+  real_fval = df_perm_aov_FNL %>% filter(nPerm %in% 10001 & effect %in% xEffect)
+  count = df_perm_aov_FNL %>% filter(effect %in% xEffect & Fvalue >= real_fval$Fvalue)
+  cur_pval = round((dim(count)[1]/nPerm), 4)
+  cur_sig = as.integer(cur_pval < 0.05)
+  df_cond_pval = rbind(df_cond_pval, data.frame(effect=xEffect,
+                                              sig=cur_sig,
+                                              pvalue=cur_pval))
+  #print results
+  printf("Visual area main effect (%s) is %s, p=%2.3f\n", 
+        xEffect, sig_notsig[cur_sig+1], cur_pval)
+}
+
+
+## save dataframe tables as .csv files ##
+fval_csv_name=sprintf("%s/varea_rmanova_%s_fval_perms_results.csv", csv_path, cond) 
+pval_csv_name=sprintf("%s/varea_rmanova_%s_pval_results.csv", csv_path, cond)
+write.csv(df_perm_aov_FNL, file.path(fval_csv_name))
+write.csv(df_cond_pval, file.path(pval_csv_name))
+
+```
+
+
+
+
+``` {r visual area x eccentricity }
+
+cond = c("vOnlyCoh1")
+xCond=1
+roi = c("V1", "V2", "V3")
+region= c("fovea3.5_fmasked", "periphery-fovea3.5_fmasked")
+
+df_perm_aov_fmasked = data.frame(matrix(vector(), 0, 7,
+                                dimnames=list(c(), c("cond" ,"effect", "nPerm", "mask", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+
+for (xROI in 1:length(roi)){
+  for (xFP in 1:length(region)){
+    for (xCond in 1:length(cond)){
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI], region[xFP]) 
+      data = read.csv(file.path(prefix), header=FALSE)
+      data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI], fp = region[xFP])
+      wide_df = rbind(wide_df, data)
+    }}}
+
+
+varea_fp_df <- melt(setDT(wide_df), 
+                  id.vars = c("SN", "cond", "roi", "fp"), 
+                  variable.name = c("Perm"))
+
+names(varea_fp_df) = c("SN", "cond", "roi", "fp", "Perm", "acc")
+varea_fp_df$cond = as.factor(varea_fp_df$cond)
+varea_fp_df$SN = as.factor(varea_fp_df$SN)
+varea_fp_df$fp = as.factor(varea_fp_df$fp)
+varea_fp_df$roi = as.factor(varea_fp_df$roi)
+
+#anova for each permutation 
+printf('3 (varea) x 2 (fp) RM ANOVA\n')
+printf('starting %s cond....\n', cond[xCond])
+
+  for (i in 1:(nPerm+1)){
+    test_perm = varea_fp_df %>% filter(Perm %in% paste("V", i, sep="")) 
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = c(roi, fp))$ANOVA 
+    df_perm_aov = rbind(df_perm_aov, data.frame(cond=cond[xCond],
+                                                effect=res.aov$Effect[1], 
+                                                nPerm=i,
+                                                mask="fmasked",
+                                                Fvalue=res.aov$F[1],
+                                                p=res.aov$p[1]))
+    df_perm_aov = rbind(df_perm_aov, data.frame(cond=cond[xCond],
+                                                effect=res.aov$Effect[2], 
+                                                nPerm=i,
+                                                mask="fmasked",
+                                                Fvalue=res.aov$F[2],
+                                                p=res.aov$p[2]))
+    df_perm_aov = rbind(df_perm_aov, data.frame(cond=cond[xCond],
+                                                effect=res.aov$Effect[3], 
+                                                nPerm=i,
+                                                mask="fmasked",
+                                                Fvalue=res.aov$F[3],
+                                                p=res.aov$p[3]))
+    if (i %% 500 == 0) {
+      printf('%s %s - permutation testing no. %d\n', cond[xCond], "fmasked", i)
+    }
+  }
+
+##anat mask rm anova
+region= c("fovea3.5", "periphery-fovea3.5")
+df_perm_aov_anat = data.frame(matrix(vector(), 0, 7,
+                                dimnames=list(c(), c("cond" ,"effect", "nPerm", "mask", "Fvalue", "p"))),
+                         stringsAsFactors=Y)
+wide_df <- data.frame(Date=as.Date(character()),
+                      File=character(), 
+                      User=character(), 
+                      stringsAsFactors=TRUE)
+
+
+for (xROI in 1:length(roi)){
+  for (xFP in 1:length(region)){
+    for (xCond in 1:length(cond)){
+      prefix = sprintf("%s/%s_%s_%s_acc_all_dist.csv", path, cond[xCond], roi[xROI], region[xFP]) 
+      data = read.csv(file.path(prefix), header=FALSE)
+      data = data %>% mutate(SN = row_number(), cond = cond[xCond], roi = roi[xROI], fp = region[xFP])
+      wide_df = rbind(wide_df, data)
+    }}}
+
+
+varea_fp_df <- melt(setDT(wide_df), 
+                  id.vars = c("SN", "cond", "roi", "fp"), 
+                  variable.name = c("Perm"))
+
+names(varea_fp_df) = c("SN", "cond", "roi", "fp", "Perm", "acc")
+varea_fp_df$cond = as.factor(varea_fp_df$cond)
+varea_fp_df$SN = as.factor(varea_fp_df$SN)
+varea_fp_df$fp = as.factor(varea_fp_df$fp)
+varea_fp_df$roi = as.factor(varea_fp_df$roi)
+
+#anova for each permutation 
+printf('3 (varea) x 2 (fp) RM ANOVA\n')
+printf('starting %s cond....\n', cond[xCond])
+
+roi = unique(varea_fp_df$roi)
+
+
+  for (i in 1:(nPerm+1)){
+    test_perm = varea_fp_df %>% filter(Perm %in% paste("V", i, sep="")) 
+    res.aov = anova_test(data = test_perm, dv = acc, wid = SN, within = c(roi, fp))$ANOVA 
+    df_perm_aov_anat = rbind(df_perm_aov_anat, data.frame(cond=cond[xCond],
+                                                effect=res.aov$Effect[1], 
+                                                nPerm=i,
+                                                mask="anat",
+                                                Fvalue=res.aov$F[1],
+                                                p=res.aov$p[1]))
+    df_perm_aov_anat = rbind(df_perm_aov_anat, data.frame(cond=cond[xCond],
+                                                  effect=res.aov$Effect[2], 
+                                                nPerm=i,
+                                                mask="anat",
+                                                Fvalue=res.aov$F[2],
+                                                p=res.aov$p[2]))
+    df_perm_aov_anat = rbind(df_perm_aov_anat, data.frame(cond=cond[xCond],
+                                                  effect=res.aov$Effect[3], 
+                                                nPerm=i,
+                                                mask="anat",
+                                                Fvalue=res.aov$F[3],
+                                                p=res.aov$p[3]))
+    if (i %% 500 == 0) {
+      printf('%s permutation testing no. %d\n', cond[xCond], i)
+    }
+  }
+
+```
+
+``` {r save as csv file}
+knitr::kable(df_cia_pval)
+
+
+df_varea_fp_pval = data.frame(matrix(vector(), 0, 3,
+                                   dimnames=list(c(), c("effect", "pvalue", "sig"))),
+                            stringsAsFactors=Y)
+
+effects = unique(df_perm_aov$effect)
+#p-value 
+sig_notsig = c("not significant", "significant")
+  for (xEff in 1:length(effects)){
+    real_fval = df_perm_aov[df_perm_aov$nPerm == 10001 & df_perm_aov$effect == effects[xEff], ]
+    #df_perm_aov %>% filter(nPerm %in% 10001 & effect %in% effects[xEff] & roi %in% roi[xROI])
+    count = df_perm_aov[df_perm_aov$effect == effects[xEff] & df_perm_aov$Fvalue >= real_fval$Fvalue,]
+    cur_pval = round((dim(count)[1]/nPerm), 5)
+    cur_sig = as.integer(cur_pval < 0.05)
+    df_varea_fp_pval = rbind(df_varea_fp_pval, data.frame(effect=effects[xEff],
+                                                     roi=roi[xROI],
+                                                      sig=cur_sig,
+                                                      value=cur_pval))
+    #print results
+    printf("3x2 RM ANOVA: %s effect in %s is %s, p=%2.3f\n", 
+           effects[xEff], cond[xCond], sig_notsig[cur_sig+1], cur_pval)
+  }
+
+
+df_varea_fp_pval2 = data.frame(matrix(vector(), 0, 3,
+                                   dimnames=list(c(), c("effect", "pvalue", "sig"))),
+                            stringsAsFactors=Y)
+
+effects = unique(df_perm_aov$effect)
+#p-value 
+sig_notsig = c("not significant", "significant")
+  for (xEff in 1:length(effects)){
+    real_fval = df_perm_aov2[df_perm_aov$nPerm == 10001 & df_perm_aov$effect == effects[xEff], ]
+    #df_perm_aov %>% filter(nPerm %in% 10001 & effect %in% effects[xEff] & roi %in% roi[xROI])
+    count = df_perm_aov2[df_perm_aov$effect == effects[xEff] & df_perm_aov$Fvalue >= real_fval$Fvalue,]
+    cur_pval = round((dim(count)[1]/nPerm), 5)
+    cur_sig = as.integer(cur_pval < 0.05)
+    df_varea_fp_pval2 = rbind(df_varea_fp_pval2, data.frame(effect=effects[xEff],
+                                                      roi=roi[xROI],
+                                                      sig=cur_sig,
+                                                      value=cur_pval))
+    #print results
+    printf("3x2 RM ANOVA: %s effect in %s is %s, p=%2.3f\n", 
+           effects[xEff], cond[xCond], sig_notsig[cur_sig+1], cur_pval)
+  }
+
+df_varea_fp_pval = df_varea_fp_pval %>% mutate(roi = "fmasked")
+df_varea_fp_pval2 = df_varea_fp_pval2 %>% mutate(roi = "anat")
+df_perm_aov_FNL = full_join(df_perm_aov1, df_perm_aov2)
+df_varea_fp_pval_FNL = full_join(df_varea_fp_pval, df_varea_fp_pval2)
+## save dataframe tables as .csv files ##
+fval_csv_name=sprintf("%s/rmanova_varea_fp_%s_fval_perms_results.csv", csv_path, cond[xCond]) 
+pval_csv_name=sprintf("%s/rmanova_varea_fp_%s_pval_results.csv", csv_path, cond[xCond])
+write.csv(df_perm_aov, file.path(fval_csv_name))
+write.csv(df_varea_fp_pval, file.path(pval_csv_name))
+
+```
+
+
+
+### END
