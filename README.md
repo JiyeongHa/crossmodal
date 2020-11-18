@@ -6,23 +6,30 @@ This repository includes figures and analyzing codes for the LGN project data (p
 ![experimental_Design_and_Psychophysics](https://github.com/JiyeongHa/crossmodal/blob/master/CrM_expDesign_bhdata.png)  
 Fig 1. Experimental design and psychophysics results
 
+
 ![Watch the video](https://github.com/JiyeongHa/crossmodal/blob/master/Crossmodal_cong-incong.mp4)
 Fig 2. Demo for the congruent and incongruent trials
+
 
 ![Dividing center-periphery](https://github.com/JiyeongHa/crossmodal/blob/master/center-periphery.png)  
 Fig 3. Definition of central and peripheral visual ROIs
 
+
 ![results](https://github.com/JiyeongHa/crossmodal/blob/master/center-periphery-results.png)  
 Fig 4. Motion direction (upward/downward) classification results for the congruent, incongruent, and ambiguous conditions
+
 
 ![results2](https://github.com/JiyeongHa/crossmodal/blob/master/aOnly_results.png)  
 Fig 5. Melodic contour (ascending/descending) classification results for the auditory only condition
 
+
 ![results3](https://github.com/JiyeongHa/crossmodal/blob/master/Searchlight_results.png)  
 Fig 6. Searchlight results (medial/lateral)
 
+
 ![results4](https://github.com/JiyeongHa/crossmodal/blob/master/Searchlight_results2.png)  
 Fig 7. Searchlight results (dorsal/ventral)
+
 
 **Multisensory integration of metaphorically related audiovisual inputs in visual cortex**  
 
