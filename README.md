@@ -1,6 +1,6 @@
 # Multisensory integration of metaphorically related audiovisual inputs in visual cortex
 
-This repository includes figures and analyzing codes for the LGN project data (presented at 2019 SFN, *manuscript in prep*).  
+This repository includes figures, demos, and analyzing codes for the crossmodal project data (presented at 2019 SFN, *manuscript in prep*).  
 *Find the abstract below the figures.*
 
 ![experimental_Design_and_Psychophysics](https://github.com/JiyeongHa/crossmodal/blob/master/CrM_expDesign_bhdata.png)  
