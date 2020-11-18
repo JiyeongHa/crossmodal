@@ -1,2 +1,2 @@
-*.py linguist-language=Python
-*.sh linguist-language=shell
+*.m linguist-detectable=false
+*.sh linguist-detectable=false
